@@ -39,6 +39,8 @@ enum BLEProtocol {
         static let serial = Key(0x01, 0x83, 0x00, 0x00)
         static let dpiStagesGet = Key(0x0B, 0x84, 0x01, 0x00)
         static let dpiStagesSet = Key(0x0B, 0x04, 0x01, 0x00)
+        static let powerTimeoutGet = Key(0x05, 0x84, 0x00, 0x00)
+        static let powerTimeoutSet = Key(0x05, 0x04, 0x00, 0x00)
         static func brightnessGet(led: UInt8) -> Key { Key(0x10, 0x85, 0x01, led) }
         static func brightnessSet(led: UInt8) -> Key { Key(0x10, 0x05, 0x01, led) }
         static let staticColor = Key(0x10, 0x04, 0x00, 0x00)
@@ -153,6 +155,23 @@ enum BLEProtocol {
             return Data([0x01, 0x60, 0x00, 0x01, 0x01, buttonID, 0, 0, 0, 0])
         }
         return Data([0x01, 0x60, 0x00, 0x06, 0x01, 0x06, 0, 0, 0, 0])
+    }
+
+    static let sleepTimeoutRange = 60...900
+    static let sleepTimeoutStep = 15
+
+    static func sleepTimeoutPayload(seconds: Int) -> Data? {
+        guard sleepTimeoutRange.contains(seconds), seconds.isMultiple(of: sleepTimeoutStep) else { return nil }
+        return Data([UInt8(seconds & 0xFF), UInt8((seconds >> 8) & 0xFF)])
+    }
+
+    static func parseSleepTimeout(_ payload: Data) throws -> Int {
+        guard payload.count >= 2 else { throw HIDDevice.HIDError.badResponse }
+        let value = Int(payload[0]) | (Int(payload[1]) << 8)
+        guard sleepTimeoutRange.contains(value), value.isMultiple(of: sleepTimeoutStep) else {
+            throw HIDDevice.HIDError.badResponse
+        }
+        return value
     }
 
     static func parseDpiButtonBinding(_ payload: Data) throws -> DPIButtonBinding {

@@ -53,6 +53,11 @@ final class MouseController: ObservableObject, @unchecked Sendable {
     @Published private(set) var effect: LightingEffect = .staticColor
     @Published private(set) var lightingColor = RGB(r: 0x44, g: 0xD6, b: 0x2C) // razer green
     @Published private(set) var dpiStages: [Int] = [] // the mouse's configured DPI presets
+    @Published private(set) var dpiStagesError: String?
+    @Published private(set) var isUpdatingDpiStages = false
+    @Published private(set) var sleepTimeout: Int?
+    @Published private(set) var sleepTimeoutError: String?
+    @Published private(set) var isUpdatingSleepTimeout = false
     @Published private(set) var timeEstimate: String?
     /// Snapshots of `io`-queue-owned history, republished on the main queue for the usage graph.
     @Published private(set) var batterySamples: [BatterySample] = []
@@ -551,7 +556,17 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             self.inputWatcher.stop() // in use again: its reports would be a wake-up per movement
             alsoSet()
             self.updateStatusText()
-            if self.hasBaseline && !wasConnected { Self.playSound(connected: true) }
+            if self.hasBaseline && !wasConnected {
+                Self.playSound(connected: true)
+                // A sleeping BLE mouse may answer the battery probe before its vendor
+                // channel is ready. Queue a focused settings pass after the connection
+                // state is published so DPI, binding and power controls converge quickly.
+                DispatchQueue.main.async { [self] in
+                    guard self.deviceIsBluetooth, self.deviceID == 0x00BA else { return }
+                    self.refreshSettings()
+                    self.refreshDpiCycleButtonBinding()
+                }
+            }
             self.hasBaseline = true
         }
     }
@@ -598,11 +613,17 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             : read(RazerCommands.getDPI()) { Int(RazerCommands.parseDPI($0).x) }
         let p = read(RazerCommands.getPollingRate()) { RazerCommands.parsePollingRate($0) }
         let b = read(RazerCommands.getBrightness(led: RazerDevices.brightnessLed(pid: dev.productID))) { RazerCommands.brightnessPercent(fromRaw: $0.arguments[2]) }
+        let sleep: Int? = {
+            guard dev.isBluetooth, let bluetooth = dev as? BluetoothDevice, !linkDead, !self.userWorkPending else { return nil }
+            do { return try bluetooth.readSleepTimeout() }
+            catch { linkDead = true; return nil }
+        }()
         publish {
             if let d { self.update(\.dpi, d) }
             if let p { self.update(\.pollRate, p) }
             if let b { self.update(\.brightness, b) }
             if !stages.isEmpty { self.update(\.dpiStages, stages) }
+            if let sleep { self.update(\.sleepTimeout, sleep) }
             // The mouse's own controls change config behind the app's back (the DPI-cycle
             // button; onboard memory surviving an app restart). If what we just read
             // contradicts the active profile, its checkmark is a lie — clear it. Comparing
@@ -717,6 +738,64 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             self.publish {
                 guard ok else { self.lastWriteFailure = Date(); return }
                 self.dpi = Int(v); self.clearActiveProfileIfNeeded()
+            }
+        }
+    }
+
+    func setDPIStageValues(_ values: [Int], activeStage: Int? = nil) {
+        guard deviceIsBluetooth, deviceID == 0x00BA,
+              values.count >= 1, values.count <= RazerCommands.maxDPIStages else { return }
+        let active = activeStage ?? max(0, values.firstIndex(of: dpi) ?? 0)
+        guard values.indices.contains(active) else { return }
+        let clamped = values.map { max(100, min($0, deviceMaxDPI)) }
+        isUpdatingDpiStages = true
+        dpiStagesError = nil
+        userCommand { [weak self] in
+            guard let self else { return }
+            do {
+                guard let bluetooth = try self.ensureDevice() as? BluetoothDevice,
+                      bluetooth.productID == 0x00BA else { throw HIDDevice.HIDError.notSupported }
+                let table = BLEProtocol.DPIStageTable(active: active, values: clamped)
+                try bluetooth.setDpiStages(table)
+                self.publish {
+                    self.dpiStages = clamped
+                    self.dpi = clamped[active]
+                    self.isUpdatingDpiStages = false
+                    self.dpiStagesError = nil
+                    self.clearActiveProfileIfNeeded()
+                }
+            } catch {
+                self.publish {
+                    self.isUpdatingDpiStages = false
+                    self.dpiStagesError = "DPI stages could not be verified: \(error.localizedDescription)"
+                    self.lastWriteFailure = Date()
+                }
+            }
+        }
+    }
+
+    func setSleepTimeout(_ seconds: Int) {
+        guard deviceIsBluetooth, deviceID == 0x00BA,
+              BLEProtocol.sleepTimeoutPayload(seconds: seconds) != nil else { return }
+        isUpdatingSleepTimeout = true
+        sleepTimeoutError = nil
+        userCommand { [weak self] in
+            guard let self else { return }
+            do {
+                guard let bluetooth = try self.ensureDevice() as? BluetoothDevice,
+                      bluetooth.productID == 0x00BA else { throw HIDDevice.HIDError.notSupported }
+                try bluetooth.setSleepTimeout(seconds)
+                self.publish {
+                    self.sleepTimeout = seconds
+                    self.isUpdatingSleepTimeout = false
+                    self.sleepTimeoutError = nil
+                }
+            } catch {
+                self.publish {
+                    self.isUpdatingSleepTimeout = false
+                    self.sleepTimeoutError = "Sleep timeout could not be verified: \(error.localizedDescription)"
+                    self.lastWriteFailure = Date()
+                }
             }
         }
     }

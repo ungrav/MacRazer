@@ -50,6 +50,10 @@ struct PopoverView: View {
     @State private var color: Color = .razerGreen
     /// Recallable custom DPI — persisted per-mouse, and never above the mouse's max.
     @State private var customDPI: Int = 8000
+    @State private var editingDpiStage: Int?
+    @State private var dpiStageDraft = ""
+    @State private var dpiStageError: String?
+    @FocusState private var dpiStageFieldFocused: Bool
     @State private var versionHovered = false
     @State private var gearHovered = false
 
@@ -173,6 +177,7 @@ struct PopoverView: View {
                 dpiCard
                 if controller.supportsPollRate { pollCard }
                 if controller.deviceHasLighting { lightingCard } // hidden for no-LED mice (e.g. Atheris)
+                if supportsBasiliskBluetooth { powerManagementCard }
             }
             .disabled(!controller.connected)
             .opacity(controller.connected ? 1 : 0.45)
@@ -191,6 +196,7 @@ struct PopoverView: View {
         .onAppear {
             if controller.dpi != 0 { dpiValue = Double(controller.dpi) }
             brightnessValue = Double(controller.brightness)
+            if let timeout = controller.sleepTimeout { sleepTimeoutValue = Double(timeout) }
             loadCustomDPI()
             color = controller.lightingColor.swiftUIColor
         }
@@ -205,6 +211,11 @@ struct PopoverView: View {
         }
         .onChange(of: controller.deviceKey) { _, _ in loadCustomDPI() } // reload/clamp per mouse
         .onChange(of: controller.deviceMaxDPI) { _, _ in loadCustomDPI() }
+        .onChange(of: controller.sleepTimeout) { _, new in if let new { sleepTimeoutValue = Double(new) } }
+    }
+
+    private var supportsBasiliskBluetooth: Bool {
+        controller.deviceIsBluetooth && controller.deviceID == 0x00BA
     }
 
     // MARK: Custom DPI (per-mouse, clamped to the model's max)
@@ -821,21 +832,42 @@ struct PopoverView: View {
                 .controlSize(.small)
             }
             HStack(spacing: 6) {
-                ForEach(displayedStages, id: \.self) { dpiChip($0) }
+                ForEach(Array(displayedStages.enumerated()), id: \.offset) { index, value in
+                    dpiChip(value, index: index)
+                }
                 if controller.supportsFreeDPI { customChip }
+            }
+            if let dpiStageError {
+                Text(dpiStageError).font(.system(size: 10.5)).foregroundStyle(Color.batteryLow)
+            } else if let error = controller.dpiStagesError {
+                Text(error).font(.system(size: 10.5)).foregroundStyle(Color.batteryLow)
             }
         }
         }
     }
 
     /// A fixed-preset DPI chip.
-    private func dpiChip(_ value: Int) -> some View {
+    private func dpiChip(_ value: Int, index: Int) -> some View {
         let active = Int(dpiValue) == value
-        return Button {
-            dpiValue = Double(value)
-            controller.setDPI(value)
-        } label: {
-            Text(verbatim: "\(value)")
+        let editing = editingDpiStage == index
+        return Group {
+            if editing {
+                TextField("DPI", text: $dpiStageDraft)
+                    .textFieldStyle(.plain)
+                    .multilineTextAlignment(.center)
+                    .monospacedDigit()
+                    .focused($dpiStageFieldFocused)
+                    .onSubmit { commitDpiStage(index: index) }
+                    .onAppear { dpiStageFieldFocused = true }
+            } else {
+                Button {
+                    dpiValue = Double(value)
+                    controller.setDPI(value)
+                } label: {
+                    Text(verbatim: "\(value)")
+                }
+                .buttonStyle(.plain)
+            }
         }
         .buttonStyle(.plain)
         .font(.system(size: 10.5, weight: active ? .semibold : .regular).monospacedDigit())
@@ -844,6 +876,80 @@ struct PopoverView: View {
         .frame(height: 24)
         .background(active ? Color.razerGreen : Color.primary.opacity(0.08),
                     in: RoundedRectangle(cornerRadius: 6))
+        .onTapGesture(count: 2) { beginDpiStageEdit(index: index, value: value) }
+        .contextMenu {
+            if supportsBasiliskBluetooth {
+                Button("Edit DPI") { beginDpiStageEdit(index: index, value: value) }
+            }
+        }
+        .disabled(controller.isUpdatingDpiStages || (editingDpiStage != nil && !editing))
+    }
+
+    private func beginDpiStageEdit(index: Int, value: Int) {
+        guard supportsBasiliskBluetooth, !controller.isUpdatingDpiStages else { return }
+        dpiStageError = nil
+        dpiStageDraft = String(value)
+        editingDpiStage = index
+        dpiStageFieldFocused = true
+    }
+
+    private func commitDpiStage(index: Int) {
+        guard editingDpiStage == index else { return }
+        defer { editingDpiStage = nil; dpiStageFieldFocused = false }
+        guard let value = Int(dpiStageDraft.trimmingCharacters(in: .whitespaces)),
+              (100...controller.deviceMaxDPI).contains(value) else {
+            dpiStageError = "DPI must be between 100 and \(controller.deviceMaxDPI)."
+            return
+        }
+        var values = displayedStages
+        guard values.indices.contains(index), values[index] != value else { return }
+        values[index] = value
+        dpiStageError = nil
+        controller.setDPIStageValues(values)
+    }
+
+    @State private var sleepTimeoutValue: Double = 300
+
+    private var powerManagementCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    sectionLabel("Power Management", "moon.zzz")
+                    Spacer()
+                    Text(formatSleepTimeout(Int(sleepTimeoutValue)))
+                        .font(.system(size: 12, weight: .medium)).monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 6) {
+                    Image(systemName: "moon.fill").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Slider(value: $sleepTimeoutValue, in: 60...900, step: 15) { editing in
+                        if !editing { controller.setSleepTimeout(Int(sleepTimeoutValue)) }
+                    }
+                    .tint(.razerGreen)
+                    .controlSize(.small)
+                }
+                HStack(spacing: 5) {
+                    ForEach([60, 120, 300, 600, 900], id: \.self) { value in
+                        Button(formatSleepTimeout(value)) {
+                            sleepTimeoutValue = Double(value)
+                            controller.setSleepTimeout(value)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 9.5, weight: Int(sleepTimeoutValue) == value ? .semibold : .regular).monospacedDigit())
+                        .foregroundStyle(Int(sleepTimeoutValue) == value ? .white : .secondary)
+                        .frame(maxWidth: .infinity).frame(height: 23)
+                        .background(Int(sleepTimeoutValue) == value ? Color.razerGreen : Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+                if let error = controller.sleepTimeoutError {
+                    Text(error).font(.system(size: 10.5)).foregroundStyle(Color.batteryLow)
+                }
+            }
+        }
+    }
+
+    private func formatSleepTimeout(_ seconds: Int) -> String {
+        "\(seconds / 60)m \(String(format: "%02d", seconds % 60))s"
     }
 
     /// The custom DPI chip — shows the saved manual value, green outline to mark it as the
