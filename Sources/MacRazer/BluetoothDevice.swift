@@ -152,6 +152,27 @@ final class BluetoothDevice: NSObject, RazerTransport, @unchecked Sendable {
         return try BLEProtocol.DPIStageTable(decoding: Array(exchange(request)))
     }
 
+    /// Read the Basilisk V3 X HyperSpeed's dedicated DPI Cycle assignment. This is a
+    /// model-specific control layered on the shared BLE framing; ordinary Razer reports
+    /// continue to use `sendWithRetry` above.
+    func readDpiCycleBinding() throws -> BLEProtocol.DPIButtonBinding {
+        let request = BLEProtocol.Request(key: .dpiButtonGet, payload: [], reply: .ack)
+        return try BLEProtocol.parseDpiButtonBinding(exchange(request))
+    }
+
+    /// Write a DPI Cycle assignment and verify the mouse's readback before returning. A
+    /// software action is represented by the reserved F20 keyboard usage and is interpreted
+    /// by ButtonRemapper while this app is running.
+    func setDpiCycleBinding(_ binding: BLEProtocol.DPIButtonBinding) throws {
+        let request = BLEProtocol.Request(key: .dpiButtonSet,
+                                          payload: Array(BLEProtocol.dpiButtonPayload(for: binding)),
+                                          reply: .ack)
+        _ = try exchange(request)
+        guard try readDpiCycleBinding() == binding else {
+            throw HIDDevice.HIDError.badResponse
+        }
+    }
+
     private func exchange(_ request: BLEProtocol.Request) throws -> Data {
         let id = nextID
         // Stay clear of 0x00 and 0x01: the mouse uses 0x01 for its unsolicited frame.

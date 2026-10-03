@@ -87,6 +87,10 @@ final class MouseController: ObservableObject, @unchecked Sendable {
     @Published private(set) var deviceKey: String?
     /// The connected mouse is on Bluetooth. Read through the `supports…` properties below.
     @Published private(set) var deviceIsBluetooth = false
+    /// The Basilisk V3 X HyperSpeed's dedicated DPI Cycle assignment, available over Bluetooth.
+    @Published private(set) var dpiCycleButtonBinding: BLEProtocol.DPIButtonBinding?
+    @Published private(set) var dpiCycleButtonError: String?
+    @Published private(set) var isUpdatingDpiCycleButton = false
     /// A Razer mouse seen on Bluetooth while we aren't controlling one, and why.
     @Published private(set) var bluetoothMouse: BluetoothMouseStatus?
 
@@ -713,6 +717,67 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             self.publish {
                 guard ok else { self.lastWriteFailure = Date(); return }
                 self.dpi = Int(v); self.clearActiveProfileIfNeeded()
+            }
+        }
+    }
+
+    func refreshDpiCycleButtonBinding() {
+        userCommand { [weak self] in
+            guard let self else { return }
+            self.publish {
+                self.isUpdatingDpiCycleButton = true
+                self.dpiCycleButtonBinding = nil
+                self.dpiCycleButtonError = nil
+            }
+            do {
+                guard let bluetooth = try self.ensureDevice() as? BluetoothDevice,
+                      bluetooth.productID == 0x00BA else {
+                    throw HIDDevice.HIDError.notSupported
+                }
+                let binding = try bluetooth.readDpiCycleBinding()
+                self.publish {
+                    self.dpiCycleButtonBinding = binding
+                    self.dpiCycleButtonError = nil
+                    self.isUpdatingDpiCycleButton = false
+                }
+            } catch {
+                self.publish {
+                    self.dpiCycleButtonError = "Could not read this button over Bluetooth: \(error.localizedDescription)"
+                    self.isUpdatingDpiCycleButton = false
+                }
+            }
+        }
+    }
+
+    func setDpiCycleButtonBinding(_ binding: BLEProtocol.DPIButtonBinding,
+                                  completion: @escaping @Sendable (Bool) -> Void = { _ in }) {
+        userCommand { [weak self] in
+            guard let self else { return }
+            self.publish {
+                self.isUpdatingDpiCycleButton = true
+                self.dpiCycleButtonError = nil
+            }
+            do {
+                guard let bluetooth = try self.ensureDevice() as? BluetoothDevice,
+                      bluetooth.productID == 0x00BA else {
+                    throw HIDDevice.HIDError.notSupported
+                }
+                try bluetooth.setDpiCycleBinding(binding)
+                let readback = try bluetooth.readDpiCycleBinding()
+                guard readback == binding else { throw HIDDevice.HIDError.badResponse }
+                self.publish {
+                    self.dpiCycleButtonBinding = readback
+                    self.dpiCycleButtonError = nil
+                    self.isUpdatingDpiCycleButton = false
+                    completion(true)
+                }
+            } catch {
+                self.publish {
+                    self.dpiCycleButtonError = "Button assignment failed or did not read back: \(error.localizedDescription)"
+                    self.isUpdatingDpiCycleButton = false
+                    self.lastWriteFailure = Date()
+                    completion(false)
+                }
             }
         }
     }

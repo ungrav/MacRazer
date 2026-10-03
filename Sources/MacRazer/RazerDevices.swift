@@ -86,6 +86,10 @@ enum RazerDevices {
         // DPI stages and brightness on LOGO_LED, the same LED as over USB. Transaction ids
         // don't apply: BLE frames carry their own request id.
         .init(pid: 0x00DC, name: "Razer Cobra HyperSpeed (Bluetooth)", fullySupported: true, hasBattery: true, hasLighting: true, maxDPI: 26000, transactionId: 0x1f, matrixTransactionId: 0x1f, connection: .bluetooth, silhouette: .cobraPro, dischargeCurveModelKey: "cobra-hyperspeed"),
+        // Basilisk V3 X HyperSpeed over Bluetooth. The shared BLE layer covers battery, DPI,
+        // stages and static lighting; the DPI Cycle assignment is handled by BluetoothDevice.
+        // Its only lit zone is the scroll wheel, so brightness must target SCROLL_LED.
+        .init(pid: 0x00BA, name: "Razer Basilisk V3 X HyperSpeed (Bluetooth)", fullySupported: true, hasBattery: true, hasLighting: true, maxDPI: 18000, transactionId: 0x1f, matrixTransactionId: 0x1f, brightnessLed: Razer.scrollLed, connection: .bluetooth, silhouette: .cobra, dischargeCurveModelKey: nil),
         // Plain Cobra per razermouse_driver.c: 0xFF for standard/misc (serial :1509,
         // polling :2011/:2193, DPI :2600/:2781) but 0x1f for every extended-matrix
         // command (brightness :4202/:4312, spectrum :4622, static :5085, none :5301).

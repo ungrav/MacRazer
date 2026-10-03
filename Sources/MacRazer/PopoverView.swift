@@ -119,10 +119,11 @@ struct PopoverView: View {
         // a re-render dismisses an open SwiftUI Menu, collapsing the shortcut picker while
         // the user is still choosing. This page only depends on the remapper, whose own
         // publishes (detected buttons, mappings) still update it normally.
-        ButtonsPage(remapper: remapper, onBack: { page = .main }).equatable()
+        ButtonsPage(controller: controller, remapper: remapper, onBack: { page = .main }).equatable()
     }
 
     private struct ButtonsPage: View, Equatable {
+        let controller: MouseController
         let remapper: ButtonRemapper
         let onBack: () -> Void
 
@@ -132,7 +133,7 @@ struct PopoverView: View {
 
         var body: some View {
             ScrollView {
-                RemapView(remapper: remapper, onBack: onBack)
+                RemapView(remapper: remapper, controller: controller, onBack: onBack)
                     .frame(maxWidth: .infinity)
             }
         }

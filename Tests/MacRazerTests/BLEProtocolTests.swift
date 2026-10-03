@@ -108,6 +108,21 @@ final class BLEProtocolTests: XCTestCase {
         XCTAssertEqual(try BLEProtocol.DPIStageTable(decoding: table.encoded()), table)
     }
 
+    func testDpiButtonBindingsRoundTrip() throws {
+        for binding in BLEProtocol.DPIButtonBinding.allCases + [.softwareBridge] {
+            let payload = BLEProtocol.dpiButtonPayload(for: binding)
+            XCTAssertEqual(try BLEProtocol.parseDpiButtonBinding(payload), binding)
+        }
+    }
+
+    func testDpiButtonPayloadUsesF20ForSoftwareBridge() throws {
+        XCTAssertEqual(BLEProtocol.dpiButtonPayload(for: .softwareBridge),
+                       Data([0x01, 0x60, 0x00, 0x02, 0x02, 0x00, 0x6F, 0, 0, 0]))
+        XCTAssertEqual(try BLEProtocol.parseDpiButtonBinding(
+            Data([0x01, 0x60, 0x00, 0x02, 0x02, 0x00, 0x6F, 0, 0, 0])),
+                       .softwareBridge)
+    }
+
     func testStageTableRejectsAnActiveIDItDoesNotList() {
         XCTAssertThrowsError(try BLEProtocol.DPIStageTable(decoding: [0x09, 0x01, 0x01, 0x90, 0x01, 0x90, 0x01]))
     }
