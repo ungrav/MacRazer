@@ -382,7 +382,7 @@ enum BLEProtocol {
     /// `[id, x_lo, x_hi, y_lo, y_hi, 0, 0]` with ids from 1 and little-endian DPI. The mouse
     /// leaves the final reserved byte off its replies (36 bytes for five stages, not 37),
     /// so decoding needs only the first five bytes of the last record.
-    struct DPIStageTable: Equatable {
+    struct DPIStageTable: Equatable, Sendable {
         /// 0-based index into `values`.
         var active: Int
         var values: [Int]

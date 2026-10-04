@@ -419,6 +419,20 @@ final class ButtonRemapper: ObservableObject, @unchecked Sendable {
                 }
             }.store(in: &dpiObservers)
 
+        controller.$wakeRecoveryCounter
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self, weak controller] _ in
+                guard let self, let controller, controller.connected, controller.deviceIsBluetooth,
+                      controller.deviceID == 0x00BA else { return }
+                // Re-read the physical assignment after wake even if CoreBluetooth kept
+                // the same session. The existing verified-bridge flow restores a saved
+                // software action if firmware returned the button to DPI Cycle.
+                self.dpiBridgeRestoreAttempted = false
+                self.dpiBridgeReadRequested = false
+                controller.refreshDpiCycleButtonBinding()
+            }.store(in: &dpiObservers)
+
         controller.$dpiCycleButtonBinding
             .combineLatest(controller.$deviceIsBluetooth)
             .combineLatest(controller.$isUpdatingDpiCycleButton)

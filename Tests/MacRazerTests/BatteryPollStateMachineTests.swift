@@ -158,10 +158,12 @@ final class BatteryPollStateMachineTests: XCTestCase {
     }
 
     func testNothingPluggedInPollsRarely() {
-        // HIDMonitor reports the dongle or cable coming back, so polling here is a safety net.
+        // HIDMonitor reports supported USB and Bluetooth devices coming back; the short
+        // poll is only the safety net if macOS omits an appearance notification.
         var m = BatteryPollStateMachine()
         _ = m.handle(.failure(deviceGone: true), immediateOffline: true)
         XCTAssertEqual(m.nextPollInterval(pointerActive: false), Cadence.unplugged)
+        XCTAssertEqual(Cadence.unplugged, 15, "a missed BLE wake notification must not cost minutes")
     }
 
     func testAReplugAfterALongAbsenceGetsFastPollsAgain() {

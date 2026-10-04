@@ -254,7 +254,7 @@ struct PopoverView: View {
                 }
                 .frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(controller.deviceName ?? "No mouse connected")
+                    Text(controller.deviceName ?? controller.bluetoothMouse?.name ?? "No mouse connected")
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                     HStack(spacing: 5) {
@@ -286,6 +286,11 @@ struct PopoverView: View {
     }
 
     private var headerSubtitle: String {
+        switch controller.bluetoothRecoveryState {
+        case .reconnecting where !controller.connected: return "Reconnecting…"
+        case .restoringSettings: return "Restoring settings…"
+        default: break
+        }
         if controller.connected { return controller.deviceSupported ? "Connected" : "Connected · limited support" }
         if controller.bluetoothMouse != nil { return "On Bluetooth" }
         if controller.deviceName != nil { return "Offline" }
@@ -765,8 +770,6 @@ struct PopoverView: View {
     }
 
     private var batterySubtitle: String {
-        if controller.charging { return "Charging" }
-        if let est = controller.timeEstimate { return est }
         if !controller.connected {
             switch controller.bluetoothMouse {
             case .needsModeSwitch: return "On Bluetooth. Use 2.4 GHz or USB-C"
@@ -777,6 +780,8 @@ struct PopoverView: View {
             if needsPermission { return "Needs Input Monitoring permission" }
             return "Disconnected. Wake the mouse and refresh"
         }
+        if controller.charging { return "Charging" }
+        if let est = controller.timeEstimate { return est }
         if controller.batteryPercent != nil { return "Estimating time remaining…" }
         return "Reading battery…"
     }
