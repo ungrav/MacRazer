@@ -39,6 +39,12 @@ enum BluetoothMouseStatus: Equatable {
 /// `@unchecked Sendable`: state is accessed under a strict discipline — `device` only on the
 /// `io` queue, `@Published` properties only on the main queue (via `publish`).
 final class MouseController: ObservableObject, @unchecked Sendable {
+    static let connectionSoundsEnabledKey = "connectionSoundsEnabled"
+
+    static func connectionSoundsEnabled(defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: connectionSoundsEnabledKey) as? Bool ?? true
+    }
+
     @Published private(set) var connected = false
     @Published private(set) var batteryPercent: Int?
     @Published private(set) var charging = false
@@ -558,6 +564,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
     private static let connectSound = NSSound.Name("Pop")
     private static let disconnectSound = NSSound.Name("Submarine")
     private static func playSound(connected: Bool) {
+        guard connectionSoundsEnabled() else { return }
         NSSound(named: connected ? connectSound : disconnectSound)?.play()
     }
 

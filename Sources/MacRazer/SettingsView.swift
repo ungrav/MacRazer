@@ -23,12 +23,14 @@ struct SettingsView: View {
     var onAutoInstallChanged: (() -> Void)?
     /// The crash window's "Don't Ask Again" writes the same key, so this is how to undo it.
     @AppStorage(CrashLogScanner.offerKey) private var offerCrashReports = true
+    @AppStorage(MouseController.connectionSoundsEnabledKey) private var connectionSoundsEnabled = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             header
             titledSection("General") {
                 launchAtLoginRow
+                connectionSoundsRow
                 // Hidden rather than disabled for a mouse with no battery: there is no
                 // percentage to show, so the switch would be a promise about nothing.
                 if controller.deviceHasBattery { batteryPercentRow }
@@ -90,6 +92,14 @@ struct SettingsView: View {
                     .foregroundStyle(Color.razerGreen)
             }
         }
+    }
+
+    private var connectionSoundsRow: some View {
+        settingRow(
+            title: "Connection sounds",
+            detail: "Play a sound when the mouse connects or disconnects.",
+            isOn: $connectionSoundsEnabled
+        )
     }
 
     private var batteryPercentRow: some View {
