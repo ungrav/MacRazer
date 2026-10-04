@@ -166,6 +166,13 @@ struct UsageGraphView: View {
     }
 
     private var remainingText: String {
+        if !controller.connected, let snapshot = controller.lastBatterySnapshot {
+            if snapshot.wasCharging { return "Last seen charging" }
+            guard let estimate = snapshot.estimateText else { return "Last reading only" }
+            let hours = estimate.replacingOccurrences(of: " left (est.)", with: "")
+            let age = Self.estimateAgeFormatter.localizedString(for: snapshot.observedAt, relativeTo: Date())
+            return "Last: \(hours) · \(age)"
+        }
         // Reuse `timeEstimate` (the same value the main battery card shows) rather than
         // recomputing percent/rate here — keeps the two displays from ever disagreeing, and
         // automatically picks up the learned discharge-curve estimate where one applies.
@@ -173,6 +180,12 @@ struct UsageGraphView: View {
         if estimate == "Charging" { return estimate }
         return estimate.replacingOccurrences(of: " left (est.)", with: "")
     }
+
+    private static let estimateAgeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
 
     private var sinceChargeText: String {
         // While charging, the discharge window is empty (`BatteryHistory.record` doesn't log

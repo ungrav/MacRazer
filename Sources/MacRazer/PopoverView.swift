@@ -242,7 +242,7 @@ struct PopoverView: View {
                 }
                 .frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(controller.deviceName ?? "No mouse connected")
+                    Text(controller.deviceName ?? controller.lastBatterySnapshot?.deviceName ?? "No mouse connected")
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                     HStack(spacing: 5) {
@@ -753,9 +753,15 @@ struct PopoverView: View {
     }
 
     private var batterySubtitle: String {
-        if controller.charging { return "Charging" }
-        if let est = controller.timeEstimate { return est }
         if !controller.connected {
+            if let snapshot = controller.lastBatterySnapshot {
+                let age = Self.batteryReadingAgeFormatter.localizedString(for: snapshot.observedAt, relativeTo: Date())
+                if snapshot.wasCharging { return "Last reading: \(snapshot.percent)% · charging · \(age)" }
+                if let estimate = snapshot.estimateText {
+                    return "Last estimate: \(estimate) · \(snapshot.percent)% · \(age)"
+                }
+                return "Last reading: \(snapshot.percent)% · \(age) · no estimate yet"
+            }
             switch controller.bluetoothMouse {
             case .needsModeSwitch: return "On Bluetooth. Use 2.4 GHz or USB-C"
             case .connecting: return "On Bluetooth. Connecting…"
@@ -765,9 +771,17 @@ struct PopoverView: View {
             if needsPermission { return "Needs Input Monitoring permission" }
             return "Disconnected. Wake the mouse and refresh"
         }
+        if controller.charging { return "Charging" }
+        if let est = controller.timeEstimate { return est }
         if controller.batteryPercent != nil { return "Estimating time remaining…" }
         return "Reading battery…"
     }
+
+    private static let batteryReadingAgeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
 
     private var usageButton: some View {
         Button { page = .usage } label: {
