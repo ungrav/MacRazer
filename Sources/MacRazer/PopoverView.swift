@@ -755,10 +755,10 @@ struct PopoverView: View {
     private var batterySubtitle: String {
         if !controller.connected {
             if let snapshot = controller.lastBatterySnapshot {
-                let age = Self.batteryReadingAgeFormatter.localizedString(for: snapshot.observedAt, relativeTo: Date())
+                let age = LastBatterySnapshot.relativeAgeFormatter.localizedString(for: snapshot.observedAt, relativeTo: Date())
                 if snapshot.wasCharging { return "Last reading: \(snapshot.percent)% · charging · \(age)" }
-                if let estimate = snapshot.estimateText {
-                    return "Last estimate: \(estimate) · \(snapshot.percent)% · \(age)"
+                if let estimate = snapshot.shortEstimateText {
+                    return "\(estimate) · \(age)"
                 }
                 return "Last reading: \(snapshot.percent)% · \(age) · no estimate yet"
             }
@@ -776,12 +776,6 @@ struct PopoverView: View {
         if controller.batteryPercent != nil { return "Estimating time remaining…" }
         return "Reading battery…"
     }
-
-    private static let batteryReadingAgeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter
-    }()
 
     private var usageButton: some View {
         Button { page = .usage } label: {

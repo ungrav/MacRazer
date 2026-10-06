@@ -219,6 +219,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
         if let snapshot = lastBatterySnapshotStore.load() {
             lastBatterySnapshot = snapshot
             batteryPercent = snapshot.percent
+            latestBatterySnapshotForIO = snapshot
         }
         wireHistory()
         lowBatteryNotifier.refreshAuthorization()
@@ -488,9 +489,6 @@ final class MouseController: ObservableObject, @unchecked Sendable {
         case .reading(let pct, let isCharging, let recordSample):
             if recordSample { history.record(percent: pct, charging: isCharging) }
             let estimateHours = isCharging ? nil : history.estimateHoursRemaining(currentPercent: pct, curveModel: curveModel)
-            let estimate = isCharging ? "Charging" : estimateHours.map {
-                "~\(BatteryHistory.formatDuration(hours: $0)) left (est.)"
-            }
             let snapshot = LastBatterySnapshot(
                 deviceKey: historyKey ?? String(format: "%04x", device?.productID ?? 0),
                 productID: device?.productID ?? 0,
@@ -500,8 +498,11 @@ final class MouseController: ObservableObject, @unchecked Sendable {
                 estimatedHoursRemaining: estimateHours,
                 wasCharging: isCharging
             )
+            let previousSnapshot = latestBatterySnapshotForIO?.deviceKey == snapshot.deviceKey
+                ? latestBatterySnapshotForIO : lastBatterySnapshotStore.load(snapshot.deviceKey)
+            lastBatterySnapshotStore.save(snapshot, previous: previousSnapshot)
             latestBatterySnapshotForIO = snapshot
-            lastBatterySnapshotStore.save(snapshot)
+            let estimate = isCharging ? "Charging" : snapshot.estimateText
             let snap = historySnapshot()
             let chargingNow = observedCharging // immutable capture for the @Sendable publish block
             publishConnected {
@@ -509,7 +510,9 @@ final class MouseController: ObservableObject, @unchecked Sendable {
                 // apply" banner would now be lying (polls clear it within ~15s of a wake).
                 self.update(\.profileApplyFailed, false)
                 self.update(\.batteryPercent, pct)
-                self.update(\.lastBatterySnapshot, snapshot)
+                if !snapshot.sameDisplayedState(as: self.lastBatterySnapshot) {
+                    self.update(\.lastBatterySnapshot, snapshot)
+                }
                 // Published for display (menu bar bolt, popover badge) off the *observed*
                 // flag, not the debounced one: the debounce exists to guard the destructive
                 // history reset below, and applying it here blinks the bolt off for a full
@@ -1220,10 +1223,12 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             // session, same connection); without this, everything recorded so far would be
             // orphaned forever. Cross-session PID orphans are deliberately NOT migrated:
             // with two same-model units, they could belong to the other mouse.
-            let isSameUnitKeyUpgrade = historyKey != nil && serial != nil
-                && historyKey == String(format: "%04x", pid)
-            if let saved = lastBatterySnapshotStore.load(), saved.deviceKey != key {
-                if isSameUnitKeyUpgrade, saved.deviceKey == historyKey {
+            let transition = SnapshotDeviceTransition.resolve(
+                currentKey: historyKey, newKey: key, serial: serial,
+                pidKey: String(format: "%04x", pid))
+            let isSameUnitKeyUpgrade = transition == .upgradedFromPID
+            if let oldKey = historyKey, let saved = lastBatterySnapshotStore.load(oldKey), saved.deviceKey != key {
+                if isSameUnitKeyUpgrade, saved.deviceKey == oldKey {
                     let rekeyed = LastBatterySnapshot(
                         deviceKey: key, productID: saved.productID, deviceName: saved.deviceName,
                         percent: saved.percent, observedAt: saved.observedAt,
@@ -1231,15 +1236,16 @@ final class MouseController: ObservableObject, @unchecked Sendable {
                         wasCharging: saved.wasCharging
                     )
                     lastBatterySnapshotStore.save(rekeyed, force: true)
+                    lastBatterySnapshotStore.remove(saved.deviceKey)
                     latestBatterySnapshotForIO = rekeyed
-                } else {
-                    lastBatterySnapshotStore.clear()
-                    latestBatterySnapshotForIO = nil
                 }
             }
-            let savedSnapshotForKey = lastBatterySnapshotStore.load().flatMap {
-                $0.deviceKey == key ? $0 : nil
-            }
+            // A missing serial is a failed identity probe, not evidence of a new mouse.
+            // Preserve the current offline snapshot and all other devices' snapshots.
+            let savedSnapshotForKey = serial == nil
+                ? (lastBatterySnapshotStore.load(key) ?? latestBatterySnapshotForIO)
+                : lastBatterySnapshotStore.load(key)
+            latestBatterySnapshotForIO = savedSnapshotForKey
             let restoredEstimate: String? = {
                 guard let savedSnapshotForKey else { return nil }
                 return savedSnapshotForKey.wasCharging ? "Charging" : savedSnapshotForKey.estimateText
