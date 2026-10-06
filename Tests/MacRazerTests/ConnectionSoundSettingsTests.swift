@@ -5,17 +5,44 @@ import XCTest
 @testable import MacRazer
 
 final class ConnectionSoundSettingsTests: XCTestCase {
-    func testConnectionSoundsDefaultToEnabledAndRespectStoredChoice() throws {
-        let suiteName = "ConnectionSoundSettingsTests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+    func testControllerOwnsAndPersistsConnectionSoundPreference() {
+        let defaults = UserDefaults.standard
+        let key = MouseController.connectionSoundsEnabledKey
+        let previousValue = defaults.object(forKey: key)
+        defer {
+            if let previousValue { defaults.set(previousValue, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
 
-        XCTAssertTrue(MouseController.connectionSoundsEnabled(defaults: defaults))
+        defaults.removeObject(forKey: key)
+        let controller = MouseController()
+        XCTAssertTrue(controller.connectionSoundsEnabled)
 
-        defaults.set(false, forKey: MouseController.connectionSoundsEnabledKey)
-        XCTAssertFalse(MouseController.connectionSoundsEnabled(defaults: defaults))
+        controller.connectionSoundsEnabled = false
+        XCTAssertEqual(defaults.object(forKey: key) as? Bool, false)
+        XCTAssertFalse(MouseController().connectionSoundsEnabled)
 
-        defaults.set(true, forKey: MouseController.connectionSoundsEnabledKey)
-        XCTAssertTrue(MouseController.connectionSoundsEnabled(defaults: defaults))
+        controller.connectionSoundsEnabled = true
+        XCTAssertEqual(defaults.object(forKey: key) as? Bool, true)
+    }
+
+    func testDisabledConnectionSoundDoesNotInvokePlayback() {
+        var playbackInvoked = false
+
+        MouseController.playConnectionSoundIfEnabled(false) {
+            playbackInvoked = true
+        }
+
+        XCTAssertFalse(playbackInvoked)
+    }
+
+    func testEnabledConnectionSoundInvokesPlayback() {
+        var playbackInvoked = false
+
+        MouseController.playConnectionSoundIfEnabled(true) {
+            playbackInvoked = true
+        }
+
+        XCTAssertTrue(playbackInvoked)
     }
 }

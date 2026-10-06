@@ -41,10 +41,6 @@ enum BluetoothMouseStatus: Equatable {
 final class MouseController: ObservableObject, @unchecked Sendable {
     static let connectionSoundsEnabledKey = "connectionSoundsEnabled"
 
-    static func connectionSoundsEnabled(defaults: UserDefaults = .standard) -> Bool {
-        defaults.object(forKey: connectionSoundsEnabledKey) as? Bool ?? true
-    }
-
     @Published private(set) var connected = false
     @Published private(set) var batteryPercent: Int?
     @Published private(set) var charging = false
@@ -119,6 +115,14 @@ final class MouseController: ObservableObject, @unchecked Sendable {
         didSet {
             UserDefaults.standard.set(showPercentInMenuBar, forKey: "showPercentInMenuBar")
             updateStatusText()
+        }
+    }
+
+    /// User preference: play sounds when the mouse connects or disconnects (persisted).
+    @Published var connectionSoundsEnabled: Bool =
+        (UserDefaults.standard.object(forKey: MouseController.connectionSoundsEnabledKey) as? Bool) ?? true {
+        didSet {
+            UserDefaults.standard.set(connectionSoundsEnabled, forKey: MouseController.connectionSoundsEnabledKey)
         }
     }
 
@@ -536,7 +540,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
                     self.update(\.deviceIsBluetooth, false)
                 }
                 self.updateStatusText()
-                if self.hasBaseline && wasConnected { Self.playSound(connected: false) }
+                if self.hasBaseline && wasConnected { self.playSound(connected: false) }
                 self.hasBaseline = true
             }
         }
@@ -553,7 +557,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             self.inputWatcher.stop() // in use again: its reports would be a wake-up per movement
             alsoSet()
             self.updateStatusText()
-            if self.hasBaseline && !wasConnected { Self.playSound(connected: true) }
+            if self.hasBaseline && !wasConnected { self.playSound(connected: true) }
             self.hasBaseline = true
         }
     }
@@ -563,9 +567,15 @@ final class MouseController: ObservableObject, @unchecked Sendable {
     /// here to taste — e.g. "Bottle", "Tink", "Hero" for connect.)
     private static let connectSound = NSSound.Name("Pop")
     private static let disconnectSound = NSSound.Name("Submarine")
-    private static func playSound(connected: Bool) {
-        guard connectionSoundsEnabled() else { return }
-        NSSound(named: connected ? connectSound : disconnectSound)?.play()
+    private func playSound(connected: Bool) {
+        Self.playConnectionSoundIfEnabled(connectionSoundsEnabled) {
+            NSSound(named: connected ? Self.connectSound : Self.disconnectSound)?.play()
+        }
+    }
+
+    static func playConnectionSoundIfEnabled(_ enabled: Bool, play: () -> Void) {
+        guard enabled else { return }
+        play()
     }
 
     /// Runs on `io`. Per-feature errors (failure/not-supported — e.g. no brightness on the

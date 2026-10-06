@@ -23,7 +23,6 @@ struct SettingsView: View {
     var onAutoInstallChanged: (() -> Void)?
     /// The crash window's "Don't Ask Again" writes the same key, so this is how to undo it.
     @AppStorage(CrashLogScanner.offerKey) private var offerCrashReports = true
-    @AppStorage(MouseController.connectionSoundsEnabledKey) private var connectionSoundsEnabled = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -98,7 +97,8 @@ struct SettingsView: View {
         settingRow(
             title: "Connection sounds",
             detail: "Play a sound when the mouse connects or disconnects.",
-            isOn: $connectionSoundsEnabled
+            isOn: Binding(get: { controller.connectionSoundsEnabled },
+                          set: { controller.connectionSoundsEnabled = $0 })
         )
     }
 
