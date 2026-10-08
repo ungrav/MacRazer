@@ -235,7 +235,7 @@ final class ButtonRemapper: ObservableObject, @unchecked Sendable {
     }
 
     private var shouldCaptureKeyboard: Bool {
-        isBasiliskV3XHyperSpeed && dpiCycleSoftwareAction != nil && !remappingPaused
+        isBasiliskV3XHyperSpeed && dpiCycleSoftwareAction != nil
     }
 
     private func installTap(includeKeyboard: Bool) {
@@ -395,8 +395,8 @@ final class ButtonRemapper: ObservableObject, @unchecked Sendable {
     // MARK: - DPI Cycle software actions
 
     /// F20 is reserved only after the connected Basilisk has confirmed the corresponding
-    /// onboard assignment. The event tap itself is widened only while this model is connected
-    /// and a software action is saved; ordinary users keep a mouse-only tap.
+    /// onboard assignment. The event tap includes keyboard events only while this model has a
+    /// saved software action; ordinary users keep a mouse-only tap.
     func observeDpiCycle(controller: MouseController) {
         dpiObservers.removeAll()
         controller.$deviceKey.combineLatest(controller.$deviceID)
@@ -507,7 +507,7 @@ final class ButtonRemapper: ObservableObject, @unchecked Sendable {
 
     var dpiBridgeStatus: String {
         if !remappingPermissionsGranted { return "Input capture unavailable" }
-        if !keyboardCaptureAvailable { return "Keyboard capture blocked — refresh Input Monitoring, then relaunch" }
+        if !keyboardCaptureAvailable { return "Keyboard capture is blocked. Refresh Input Monitoring, then relaunch." }
         if remappingPaused { return "Waiting for mouse connection" }
         if !dpiBridgeBindingConfirmed { return "Waiting for button assignment verification" }
         return "Ready"

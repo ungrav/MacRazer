@@ -69,10 +69,9 @@ struct BatteryPollStateMachine {
         /// short because a woken mouse reads offline, with its button remaps paused, until
         /// the next poll. Opening the popover or pressing a remapped button checks at once.
         static let asleep: TimeInterval = 15
-        /// No HID device is enumerated. USB plug/unplug and supported Bluetooth HID
-        /// appearance notifications normally trigger an immediate check; this short poll is
-        /// the fallback when macOS doesn't deliver one (notably while a BLE mouse wakes).
-        static let unplugged: TimeInterval = 15
+        /// No HID device is enumerated. `HIDMonitor` checks as soon as a device appears, so
+        /// this is only a safety net in case its registration failed.
+        static let unplugged: TimeInterval = 120
     }
 
     /// How long to wait before the next poll, given what the last one found and whether

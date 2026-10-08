@@ -881,7 +881,6 @@ struct PopoverView: View {
         .frame(height: 24)
         .background(active ? Color.razerGreen : Color.primary.opacity(0.08),
                     in: RoundedRectangle(cornerRadius: 6))
-        .onTapGesture(count: 2) { beginDpiStageEdit(index: index, value: value) }
         .contextMenu {
             if supportsBasiliskBluetooth {
                 Button("Edit DPI") { beginDpiStageEdit(index: index, value: value) }
@@ -906,7 +905,8 @@ struct PopoverView: View {
             dpiStageError = "DPI must be between 100 and \(controller.deviceMaxDPI)."
             return
         }
-        var values = displayedStages
+        guard !controller.dpiStages.isEmpty else { return }
+        var values = controller.dpiStages
         guard values.indices.contains(index), values[index] != value else { return }
         values[index] = value
         dpiStageError = nil

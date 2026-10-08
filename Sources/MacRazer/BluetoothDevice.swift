@@ -153,12 +153,12 @@ final class BluetoothDevice: NSObject, RazerTransport, @unchecked Sendable {
     }
 
     func readDpiStages() throws -> BLEProtocol.DPIStageTable {
-        try RazerRetry.run(attempts: 4) { try readStages() }
+        try RazerRetry.run(attempts: HIDDevice.defaultAttempts) { try readStages() }
     }
 
     func setDpiStages(_ stages: BLEProtocol.DPIStageTable) throws {
         let request = BLEProtocol.Request(key: .dpiStagesSet, payload: stages.encoded(), reply: .ack)
-        try RazerRetry.run(attempts: 4) {
+        try RazerRetry.run(attempts: HIDDevice.defaultAttempts) {
             _ = try exchange(request)
             guard try readStages() == stages else { throw HIDDevice.HIDError.commandFailed }
         }
@@ -166,7 +166,8 @@ final class BluetoothDevice: NSObject, RazerTransport, @unchecked Sendable {
 
     func readSleepTimeout() throws -> Int {
         let request = BLEProtocol.Request(key: .powerTimeoutGet, payload: [], reply: .ack)
-        return try RazerRetry.run(attempts: 4) { try BLEProtocol.parseSleepTimeout(exchange(request)) }
+        let payload = try RazerRetry.run(attempts: HIDDevice.defaultAttempts) { try exchange(request) }
+        return try BLEProtocol.parseSleepTimeout(payload)
     }
 
     func setSleepTimeout(_ seconds: Int) throws {
@@ -174,7 +175,7 @@ final class BluetoothDevice: NSObject, RazerTransport, @unchecked Sendable {
             throw HIDDevice.HIDError.notSupported
         }
         let request = BLEProtocol.Request(key: .powerTimeoutSet, payload: Array(payload), reply: .ack)
-        try RazerRetry.run(attempts: 4) {
+        try RazerRetry.run(attempts: HIDDevice.defaultAttempts) {
             _ = try exchange(request)
             guard try BLEProtocol.parseSleepTimeout(exchange(BLEProtocol.Request(key: .powerTimeoutGet, payload: [], reply: .ack))) == seconds else {
                 throw HIDDevice.HIDError.commandFailed
