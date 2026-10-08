@@ -3,6 +3,17 @@
 
 import SwiftUI
 
+enum DPIShortcutModifiers {
+    static func hidValue(from flags: CGEventFlags) -> UInt8 {
+        var value: UInt8 = 0
+        if flags.contains(.maskControl) { value |= 0x01 }
+        if flags.contains(.maskShift) { value |= 0x02 }
+        if flags.contains(.maskAlternate) { value |= 0x04 }
+        if flags.contains(.maskCommand) { value |= 0x08 }
+        return value
+    }
+}
+
 struct RemapView: View {
     @ObservedObject var remapper: ButtonRemapper
     var controller: MouseController?
@@ -97,12 +108,7 @@ struct RemapView: View {
 
     private func dpiShortcutBinding(keyCode: UInt16, flags: CGEventFlags) -> BLEProtocol.DPIButtonBinding? {
         guard let usage = BLEProtocol.hidUsage(forMacKeyCode: keyCode) else { return nil }
-        var modifiers: UInt8 = 0
-        if flags.contains(.maskControl) { modifiers |= 0x01 }
-        if flags.contains(.maskShift) { modifiers |= 0x02 }
-        if flags.contains(.maskAlternate) { modifiers |= 0x04 }
-        if flags.contains(.maskCommand) { modifiers |= 0x08 }
-        return .keyboardShortcut(hidUsage: usage, modifiers: modifiers)
+        return .keyboardShortcut(hidUsage: usage, modifiers: DPIShortcutModifiers.hidValue(from: flags))
     }
 
     private var header: some View {
@@ -250,7 +256,8 @@ private struct DpiCycleBindingSection: View {
     var onRecordShortcut: () -> Void
 
     var body: some View {
-        if controller.deviceID == 0x00BA, controller.deviceIsBluetooth {
+        if controller.deviceIsBluetooth,
+           controller.deviceID.map(RazerDevices.supportsDpiButtonBinding(pid:)) == true {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Text("DPI Cycle").font(.system(size: 12, weight: .medium))
@@ -330,12 +337,7 @@ private struct DpiCycleBindingSection: View {
 
     private func dpiShortcutBinding(for preset: RemapPreset) -> BLEProtocol.DPIButtonBinding? {
         guard let usage = BLEProtocol.hidUsage(forMacKeyCode: preset.keyCode) else { return nil }
-        var modifiers: UInt8 = 0
-        if preset.flags.contains(.maskControl) { modifiers |= 0x01 }
-        if preset.flags.contains(.maskShift) { modifiers |= 0x02 }
-        if preset.flags.contains(.maskAlternate) { modifiers |= 0x04 }
-        if preset.flags.contains(.maskCommand) { modifiers |= 0x08 }
-        return .keyboardShortcut(hidUsage: usage, modifiers: modifiers)
+        return .keyboardShortcut(hidUsage: usage, modifiers: DPIShortcutModifiers.hidValue(from: preset.flags))
     }
 }
 

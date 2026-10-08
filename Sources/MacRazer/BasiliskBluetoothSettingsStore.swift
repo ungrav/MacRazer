@@ -15,9 +15,8 @@ struct BasiliskBluetoothSettingsSnapshot: Codable, Equatable {
     var dpiStages: DPIStages?
     var sleepTimeout: Int?
     var brightness: Int?
-    var staticColor: RGB?
 
-    static let empty = Self(dpiStages: nil, sleepTimeout: nil, brightness: nil, staticColor: nil)
+    static let empty = Self(dpiStages: nil, sleepTimeout: nil, brightness: nil)
 }
 
 struct BasiliskBluetoothSettingsStore {

@@ -215,7 +215,8 @@ struct PopoverView: View {
     }
 
     private var supportsBasiliskBluetooth: Bool {
-        controller.deviceIsBluetooth && controller.deviceID == 0x00BA
+        controller.deviceIsBluetooth
+            && controller.deviceID.map(RazerDevices.supportsStageEditing(pid:)) == true
     }
 
     // MARK: Custom DPI (per-mouse, clamped to the model's max)
@@ -910,7 +911,9 @@ struct PopoverView: View {
         guard values.indices.contains(index), values[index] != value else { return }
         values[index] = value
         dpiStageError = nil
-        controller.setDPIStageValues(values)
+        // Keep the active stage where it is, even when the edited chip is the active one.
+        let active = controller.activeDpiStage
+        controller.setDPIStageValues(values, activeStage: active)
     }
 
     @State private var sleepTimeoutValue: Double = 300

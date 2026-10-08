@@ -137,6 +137,12 @@ final class RazerDevicesTests: XCTestCase {
         XCTAssertTrue(RazerDevices.hasLighting(pid: 0x00BA))
         XCTAssertEqual(RazerDevices.brightnessLed(pid: 0x00BA), Razer.scrollLed)
         XCTAssertEqual(RazerDevices.maxDPI(pid: 0x00BA), 18000)
+        XCTAssertTrue(RazerDevices.supportsDpiButtonBinding(pid: 0x00BA))
+        XCTAssertTrue(RazerDevices.supportsSleepTimeout(pid: 0x00BA))
+        XCTAssertTrue(RazerDevices.supportsStageEditing(pid: 0x00BA))
+        XCTAssertFalse(RazerDevices.supportsDpiButtonBinding(pid: 0x00DC))
+        XCTAssertFalse(RazerDevices.supportsSleepTimeout(pid: 0x00DC))
+        XCTAssertFalse(RazerDevices.supportsStageEditing(pid: 0x00DC))
     }
 
     func testCapabilityDefaultsForUnknownModels() {

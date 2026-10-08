@@ -194,9 +194,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         )
 
         // A Basilisk on Bluetooth enumerates under Razer's BLE vendor id (0x068E), not the
-        // USB id above. macOS removes that HID service while the mouse sleeps and recreates
-        // it as soon as the mouse wakes; use both transitions to reopen the GATT transport
-        // immediately instead of waiting for the disconnected-device poll backoff.
+        // USB id above. An appearance starts recovery but keeps a healthy GATT session;
+        // only an observed removal invalidates it before the next probe.
         bluetoothMonitor = HIDMonitor(
             vendorId: BLEProtocol.vendorId,
             onAppear: { pids in
@@ -206,8 +205,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
                 }
             },
             onRemove: { pids in
-                guard pids.isEmpty || pids.contains(where: RazerDevices.bluetoothPIDs.contains) else { return }
-                DispatchQueue.main.async { ctrl.beginBluetoothWakeRecovery() }
+                guard pids.contains(where: RazerDevices.bluetoothPIDs.contains) else { return }
+                DispatchQueue.main.async { ctrl.beginBluetoothWakeRecovery(discardBluetoothSession: true) }
             }
         )
 

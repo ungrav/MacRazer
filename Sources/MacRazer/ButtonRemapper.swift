@@ -69,7 +69,9 @@ final class ButtonRemapper: ObservableObject, @unchecked Sendable {
     /// Per-device key so each mouse keeps its own remaps.
     private var activeKey = "none"
     private var activeDeviceID: Int?
-    var isBasiliskV3XHyperSpeed: Bool { activeKey != "none" && activeDeviceID == 0x00BA }
+    var isBasiliskV3XHyperSpeed: Bool {
+        activeKey != "none" && (activeDeviceID.map(RazerDevices.supportsDpiButtonBinding(pid:)) ?? false)
+    }
     var remappingPermissionsGranted: Bool { accessibilityGranted && eventTapAvailable }
     private var defaultsKey: String { "buttonMappings-\(activeKey)" }
     /// Mirrors `MouseController.connected` (wired in AppDelegate; main-thread, same as the
@@ -413,7 +415,8 @@ final class ButtonRemapper: ObservableObject, @unchecked Sendable {
                     self.dpiBridgeBindingConfirmed = false
                     self.dpiBridgeReadRequested = false
                     self.dpiBridgeRestoreAttempted = false
-                } else if bluetooth, deviceID == 0x00BA, !self.dpiBridgeReadRequested {
+                } else if bluetooth, deviceID.map(RazerDevices.supportsDpiButtonBinding(pid:)) == true,
+                          !self.dpiBridgeReadRequested {
                     self.dpiBridgeReadRequested = true
                     controller?.refreshDpiCycleButtonBinding()
                 }
@@ -424,10 +427,9 @@ final class ButtonRemapper: ObservableObject, @unchecked Sendable {
             .receive(on: RunLoop.main)
             .sink { [weak self, weak controller] _ in
                 guard let self, let controller, controller.connected, controller.deviceIsBluetooth,
-                      controller.deviceID == 0x00BA else { return }
-                // Re-read the physical assignment after wake even if CoreBluetooth kept
-                // the same session. The existing verified-bridge flow restores a saved
-                // software action if firmware returned the button to DPI Cycle.
+                      controller.deviceID.map(RazerDevices.supportsDpiButtonBinding(pid:)) == true else { return }
+                // A wake can preserve the BLE session, so the connected observer above does
+                // not fire. Re-read once in case firmware reset the physical assignment.
                 self.dpiBridgeRestoreAttempted = false
                 self.dpiBridgeReadRequested = false
                 controller.refreshDpiCycleButtonBinding()

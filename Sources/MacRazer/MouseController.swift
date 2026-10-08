@@ -59,6 +59,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
     @Published private(set) var effect: LightingEffect = .staticColor
     @Published private(set) var lightingColor = RGB(r: 0x44, g: 0xD6, b: 0x2C) // razer green
     @Published private(set) var dpiStages: [Int] = [] // the mouse's configured DPI presets
+    @Published private(set) var activeDpiStage: Int?
     @Published private(set) var dpiStagesError: String?
     @Published private(set) var isUpdatingDpiStages = false
     @Published private(set) var sleepTimeout: Int?
@@ -247,15 +248,13 @@ final class MouseController: ObservableObject, @unchecked Sendable {
     /// A wake or mouse movement is strong evidence that a sleeping peripheral may have
     /// returned. Retry a bounded number of times, serially, and bypass the slow-open
     /// cooldown for these attempts. This never sends traffic merely to keep the mouse awake.
-    private func beginWakeRecovery() {
+    private func beginWakeRecovery(discardBluetoothSession: Bool = false) {
         let generation = beginWakeRecoveryGeneration()
         if !connected { update(\.bluetoothRecoveryState, .reconnecting) }
         io.async { [weak self] in
             guard let self, self.isCurrentWakeRecovery(generation) else { return }
-            // A BLE HID removal means the old CoreBluetooth peripheral can be stale even
-            // though the controller still holds its transport. Drop that session before
-            // the first wake probe so it retrieves the mouse macOS just re-enumerated.
-            if self.device?.isBluetooth == true {
+            // Only an observed HID removal proves the old BLE session needs replacing.
+            if discardBluetoothSession, self.device?.isBluetooth == true {
                 self.device?.close()
                 self.device = nil
                 self.restoredBluetoothSettingsForKey = nil
@@ -267,7 +266,9 @@ final class MouseController: ObservableObject, @unchecked Sendable {
 
     /// Called by the IOKit monitor when macOS removes or re-enumerates the supported BLE HID.
     /// Unlike a timer, these service transitions occur at the mouse's sleep/wake boundary.
-    func beginBluetoothWakeRecovery() { beginWakeRecovery() }
+    func beginBluetoothWakeRecovery(discardBluetoothSession: Bool = false) {
+        beginWakeRecovery(discardBluetoothSession: discardBluetoothSession)
+    }
 
     private func performWakeRecoveryAttempt(generation: Int, retryIndex: Int) {
         guard isCurrentWakeRecovery(generation) else { return }
@@ -276,9 +277,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             self.bypassBluetoothRetryCooldown = true
             self.readBatterySync()
             if self.pollState.batteryReady, let active = self.device,
-               active.isBluetooth, active.productID == 0x00BA,
-               let key = self.historyKey {
-                self.restoreBluetoothSettingsIfNeeded(device: active, deviceKey: key, force: true)
+               active.isBluetooth, RazerDevices.supportsDpiButtonBinding(pid: active.productID) {
                 self.readSettingsSync()
                 self.publish {
                     guard self.isCurrentWakeRecovery(generation) else { return }
@@ -633,6 +632,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
                     self.update(\.deviceID, nil)
                     self.update(\.deviceKey, nil)
                     self.update(\.deviceIsBluetooth, false)
+                    self.update(\.activeDpiStage, nil)
                 }
                 self.updateStatusText()
                 if self.hasBaseline && wasConnected { Self.playSound(connected: false) }
@@ -659,7 +659,8 @@ final class MouseController: ObservableObject, @unchecked Sendable {
                 // channel is ready. Queue a focused settings pass after the connection
                 // state is published so DPI, binding and power controls converge quickly.
                 DispatchQueue.main.async { [self] in
-                    guard self.deviceIsBluetooth, self.deviceID == 0x00BA else { return }
+                    guard self.deviceIsBluetooth,
+                          self.deviceID.map(RazerDevices.supportsStageEditing(pid:)) == true else { return }
                     self.refreshSettings()
                 }
             }
@@ -701,16 +702,20 @@ final class MouseController: ObservableObject, @unchecked Sendable {
         let stages = stagesReport.map { RazerCommands.parseDPIStages($0) } ?? []
         // Over Bluetooth the current DPI *is* the active stage: both reads are the same
         // stage-table request (`BLEProtocol`), so take it from the one already made.
-        let d: Int? = dev.isBluetooth
+        let activeDpiStage: Int? = dev.isBluetooth
             ? stagesReport.flatMap { r in
                 let active = RazerCommands.parseActiveDPIStage(r)
-                return stages.indices.contains(active) ? stages[active] : nil
+                return stages.indices.contains(active) ? active : nil
             }
+            : nil
+        let d: Int? = dev.isBluetooth
+            ? activeDpiStage.map { stages[$0] }
             : read(RazerCommands.getDPI()) { Int(RazerCommands.parseDPI($0).x) }
         let p = read(RazerCommands.getPollingRate()) { RazerCommands.parsePollingRate($0) }
         let b = read(RazerCommands.getBrightness(led: RazerDevices.brightnessLed(pid: dev.productID))) { RazerCommands.brightnessPercent(fromRaw: $0.arguments[2]) }
         let sleep: Int? = {
-            guard dev.productID == 0x00BA, let bluetooth = dev as? BluetoothDevice,
+            guard RazerDevices.supportsSleepTimeout(pid: dev.productID),
+                  let bluetooth = dev as? BluetoothDevice,
                   !linkDead, !self.userWorkPending else { return nil }
             do { return try bluetooth.readSleepTimeout() }
             catch HIDDevice.HIDError.timeout { linkDead = true; return nil }
@@ -721,6 +726,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             if let p { self.update(\.pollRate, p) }
             if let b { self.update(\.brightness, b) }
             if !stages.isEmpty { self.update(\.dpiStages, stages) }
+            self.update(\.activeDpiStage, activeDpiStage)
             if let sleep { self.update(\.sleepTimeout, sleep) }
             // The mouse's own controls change config behind the app's back (the DPI-cycle
             // button; onboard memory surviving an app restart). If what we just read
@@ -841,9 +847,9 @@ final class MouseController: ObservableObject, @unchecked Sendable {
     }
 
     func setDPIStageValues(_ values: [Int], activeStage: Int? = nil) {
-        guard deviceIsBluetooth, deviceID == 0x00BA,
+        guard deviceIsBluetooth, deviceID.map(RazerDevices.supportsStageEditing(pid:)) == true,
               values.count >= 1, values.count <= RazerCommands.maxDPIStages else { return }
-        let active = activeStage ?? max(0, values.firstIndex(of: dpi) ?? 0)
+        let active = activeStage ?? activeDpiStage ?? max(0, values.firstIndex(of: dpi) ?? 0)
         guard values.indices.contains(active) else { return }
         let clamped = values.map { max(100, min($0, deviceMaxDPI)) }
         isUpdatingDpiStages = true
@@ -852,7 +858,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             guard let self else { return }
             do {
                 guard let bluetooth = try self.ensureDevice() as? BluetoothDevice,
-                      bluetooth.productID == 0x00BA else { throw HIDDevice.HIDError.notSupported }
+                      RazerDevices.supportsStageEditing(pid: bluetooth.productID) else { throw HIDDevice.HIDError.notSupported }
                 let table = BLEProtocol.DPIStageTable(active: active, values: clamped)
                 try bluetooth.setDpiStages(table)
                 if let key = self.historyKey {
@@ -862,6 +868,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
                 }
                 self.publish {
                     self.dpiStages = clamped
+                    self.activeDpiStage = active
                     self.dpi = clamped[active]
                     self.isUpdatingDpiStages = false
                     self.dpiStagesError = nil
@@ -878,7 +885,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
     }
 
     func setSleepTimeout(_ seconds: Int) {
-        guard deviceIsBluetooth, deviceID == 0x00BA,
+        guard deviceIsBluetooth, deviceID.map(RazerDevices.supportsSleepTimeout(pid:)) == true,
               BLEProtocol.sleepTimeoutPayload(seconds: seconds) != nil else { return }
         isUpdatingSleepTimeout = true
         sleepTimeoutError = nil
@@ -886,9 +893,9 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             guard let self else { return }
             do {
                 guard let bluetooth = try self.ensureDevice() as? BluetoothDevice,
-                      bluetooth.productID == 0x00BA else { throw HIDDevice.HIDError.notSupported }
+                      RazerDevices.supportsSleepTimeout(pid: bluetooth.productID) else { throw HIDDevice.HIDError.notSupported }
                 try bluetooth.setSleepTimeout(seconds)
-                if let key = self.historyKey, bluetooth.productID == 0x00BA {
+                if let key = self.historyKey, RazerDevices.supportsSleepTimeout(pid: bluetooth.productID) {
                     self.bluetoothSettingsStore.update(for: key) { $0.sleepTimeout = seconds }
                 }
                 self.publish {
@@ -915,7 +922,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             }
             do {
                 guard let bluetooth = try self.ensureDevice() as? BluetoothDevice,
-                      bluetooth.productID == 0x00BA else {
+                      RazerDevices.supportsDpiButtonBinding(pid: bluetooth.productID) else {
                     throw HIDDevice.HIDError.notSupported
                 }
                 let binding = try bluetooth.readDpiCycleBinding()
@@ -943,7 +950,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             }
             do {
                 guard let bluetooth = try self.ensureDevice() as? BluetoothDevice,
-                      bluetooth.productID == 0x00BA else {
+                      RazerDevices.supportsDpiButtonBinding(pid: bluetooth.productID) else {
                     throw HIDDevice.HIDError.notSupported
                 }
                 try bluetooth.setDpiCycleBinding(binding)
@@ -1019,7 +1026,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
     /// Sets a static colour (switching the effect to `.staticColor` if needed).
     func setStaticColor(_ rgb: RGB) {
         guard !(effect == .staticColor && lightingColor == rgb) else { return } // no-change re-click
-        sendLighting(RazerCommands.setStatic(rgb: rgb), persistStaticColor: rgb) {
+        sendLighting(RazerCommands.setStatic(rgb: rgb)) {
             self.effect = .staticColor
             self.lightingColor = rgb
         }
@@ -1036,17 +1043,12 @@ final class MouseController: ObservableObject, @unchecked Sendable {
 
     /// Every lighting change the user makes goes through here, so it is the one place the
     /// effect and colour controls need to preempt a background read.
-    private func sendLighting(_ report: RazerReport, persistStaticColor: RGB? = nil,
-                              onSuccess: @escaping @Sendable () -> Void) {
+    private func sendLighting(_ report: RazerReport, onSuccess: @escaping @Sendable () -> Void) {
         userCommand { [weak self] in
             guard let self else { return }
             let ok = (try? {
                 let device = try self.ensureDevice()
                 _ = try device.sendWithRetry(report)
-                if let color = persistStaticColor, device.isBluetooth, device.productID == 0x00BA,
-                   let key = self.historyKey {
-                    self.bluetoothSettingsStore.update(for: key) { $0.staticColor = color }
-                }
                 return true
             }()) != nil
             self.publish {
@@ -1148,7 +1150,10 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             let anyOK = dpiOK || pollOK || (hasLighting && (brightOK || lightOK))
                 || (stagesReport != nil && stagesOK)
             self.publish {
-                if stagesOK, !stages.isEmpty { self.dpiStages = stages }
+                if stagesOK, !stages.isEmpty {
+                    self.dpiStages = stages
+                    self.activeDpiStage = stages.firstIndex(of: Int(dpi)) ?? 0
+                }
                 if dpiOK { self.dpi = Int(dpi) }
                 if pollOK { self.pollRate = hz }
                 if hasLighting && brightOK { self.brightness = brightnessPct }
@@ -1244,6 +1249,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
         deviceID = 0x00DC
         deviceIsBluetooth = true
         dpiStages = [400, 800, 1600, 3200, 6400]
+        activeDpiStage = 3
         dpi = 3200
     }
 
@@ -1516,13 +1522,12 @@ final class MouseController: ObservableObject, @unchecked Sendable {
     }
 
     /// `io` queue only. Restore a snapshot once per newly opened Bluetooth session. DPI
-    /// stages and power timeout have protocol readback; brightness is read back after its
-    /// write; static colour has no read command, so a successful BLE acknowledgement is the
-    /// strongest available confirmation.
-    private func restoreBluetoothSettingsIfNeeded(device: any RazerTransport, deviceKey: String,
-                                                  force: Bool = false) {
+    /// stages, power timeout and brightness have protocol readback. Static colour has no read
+    /// command, so it is deliberately not replayed on reconnect where it could override a
+    /// change made by another controller app.
+    private func restoreBluetoothSettingsIfNeeded(device: any RazerTransport, deviceKey: String) {
         guard device.isBluetooth, device.productID == 0x00BA,
-              force || restoredBluetoothSettingsForKey != deviceKey else { return }
+              restoredBluetoothSettingsForKey != deviceKey else { return }
         restoredBluetoothSettingsForKey = deviceKey
         guard let bluetooth = device as? BluetoothDevice,
               let snapshot = bluetoothSettingsStore.snapshot(for: deviceKey) else { return }
@@ -1531,7 +1536,6 @@ final class MouseController: ObservableObject, @unchecked Sendable {
         var stagesRestored: BLEProtocol.DPIStageTable?
         var timeoutRestored: Int?
         var brightnessRestored: Int?
-        var colorRestored: RGB?
 
         if let saved = snapshot.dpiStages,
            (1...RazerCommands.maxDPIStages).contains(saved.values.count),
@@ -1570,30 +1574,19 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             } catch { logBluetoothRestoreFailure("brightness", error) }
         }
 
-        if let color = snapshot.staticColor {
-            do {
-                _ = try device.sendWithRetry(RazerCommands.setStatic(rgb: color))
-                colorRestored = color
-            } catch { logBluetoothRestoreFailure("static colour", error) }
-        }
-
         let confirmedStages = stagesRestored
         let confirmedTimeout = timeoutRestored
         let confirmedBrightness = brightnessRestored
-        let confirmedColor = colorRestored
         publish {
             if let confirmedStages {
                 self.dpiStages = confirmedStages.values
+                self.activeDpiStage = confirmedStages.active
                 if confirmedStages.values.indices.contains(confirmedStages.active) {
                     self.dpi = confirmedStages.values[confirmedStages.active]
                 }
             }
             if let confirmedTimeout { self.sleepTimeout = confirmedTimeout }
             if let confirmedBrightness { self.brightness = confirmedBrightness }
-            if let confirmedColor {
-                self.effect = .staticColor
-                self.lightingColor = confirmedColor
-            }
             self.update(\.bluetoothRecoveryState, .idle)
         }
     }

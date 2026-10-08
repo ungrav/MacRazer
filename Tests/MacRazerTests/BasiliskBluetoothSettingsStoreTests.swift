@@ -17,9 +17,9 @@ final class BasiliskBluetoothSettingsStoreTests: XCTestCase {
 
         XCTAssertEqual(store.snapshot(for: "serial-a"), BasiliskBluetoothSettingsSnapshot(
             dpiStages: .init(active: 2, values: [400, 800, 1600]),
-            sleepTimeout: 300, brightness: nil, staticColor: nil))
+            sleepTimeout: 300, brightness: nil))
         XCTAssertEqual(store.snapshot(for: "serial-b"), BasiliskBluetoothSettingsSnapshot(
-            dpiStages: nil, sleepTimeout: nil, brightness: 45, staticColor: nil))
+            dpiStages: nil, sleepTimeout: nil, brightness: 45))
         XCTAssertNil(store.snapshot(for: "serial-c"))
     }
 
