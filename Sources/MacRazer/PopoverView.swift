@@ -289,7 +289,6 @@ struct PopoverView: View {
     private var headerSubtitle: String {
         switch controller.bluetoothRecoveryState {
         case .reconnecting where !controller.connected: return "Reconnecting…"
-        case .restoringSettings: return "Restoring settings…"
         default: break
         }
         if controller.connected { return controller.deviceSupported ? "Connected" : "Connected · limited support" }

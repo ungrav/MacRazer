@@ -36,7 +36,6 @@ enum BluetoothMouseStatus: Equatable {
 enum BluetoothRecoveryState: Equatable {
     case idle
     case reconnecting
-    case restoringSettings
 }
 
 /// Owns the HID device for the app's lifetime and exposes observable state to SwiftUI.
@@ -187,8 +186,6 @@ final class MouseController: ObservableObject, @unchecked Sendable {
     /// `io` queue only. Wake/activity checks bypass the long-open cooldown and do not
     /// establish another cooldown if the peripheral is still waking.
     private var bypassBluetoothRetryCooldown = false
-    private var restoredBluetoothSettingsForKey: String?
-    private let bluetoothSettingsStore = BasiliskBluetoothSettingsStore()
     static let bluetoothRetryInterval: TimeInterval = 30
     static func shouldSkipBluetoothRetry(lastFailure: Date?, now: Date,
                                          bypassCooldown: Bool) -> Bool {
@@ -257,7 +254,6 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             if discardBluetoothSession, self.device?.isBluetooth == true {
                 self.device?.close()
                 self.device = nil
-                self.restoredBluetoothSettingsForKey = nil
             }
             self.bluetoothOpenFailedAt = nil
             self.performWakeRecoveryAttempt(generation: generation, retryIndex: 0)
@@ -861,11 +857,6 @@ final class MouseController: ObservableObject, @unchecked Sendable {
                       RazerDevices.supportsStageEditing(pid: bluetooth.productID) else { throw HIDDevice.HIDError.notSupported }
                 let table = BLEProtocol.DPIStageTable(active: active, values: clamped)
                 try bluetooth.setDpiStages(table)
-                if let key = self.historyKey {
-                    self.bluetoothSettingsStore.update(for: key) {
-                        $0.dpiStages = .init(active: active, values: clamped)
-                    }
-                }
                 self.publish {
                     self.dpiStages = clamped
                     self.activeDpiStage = active
@@ -895,9 +886,6 @@ final class MouseController: ObservableObject, @unchecked Sendable {
                 guard let bluetooth = try self.ensureDevice() as? BluetoothDevice,
                       RazerDevices.supportsSleepTimeout(pid: bluetooth.productID) else { throw HIDDevice.HIDError.notSupported }
                 try bluetooth.setSleepTimeout(seconds)
-                if let key = self.historyKey, RazerDevices.supportsSleepTimeout(pid: bluetooth.productID) {
-                    self.bluetoothSettingsStore.update(for: key) { $0.sleepTimeout = seconds }
-                }
                 self.publish {
                     self.sleepTimeout = seconds
                     self.isUpdatingSleepTimeout = false
@@ -999,10 +987,6 @@ final class MouseController: ObservableObject, @unchecked Sendable {
                 }
                 return true
             }()) != nil
-            if ok, let key = self.historyKey, self.device?.isBluetooth == true,
-               self.device?.productID == 0x00BA {
-                self.bluetoothSettingsStore.update(for: key) { $0.brightness = pct }
-            }
             self.publish {
                 guard ok else { self.lastWriteFailure = Date(); return }
                 self.brightness = pct; self.clearActiveProfileIfNeeded()
@@ -1331,7 +1315,6 @@ final class MouseController: ObservableObject, @unchecked Sendable {
         default:
             knownSerial = nil
         }
-        if device?.isBluetooth == true { restoredBluetoothSettingsForKey = nil }
         device?.close() // release the user client now rather than at CF-dealloc time
         device = nil    // drop the handle so we reopen next tick
     }
@@ -1517,83 +1500,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             self.update(\.deviceHasLighting, RazerDevices.hasLighting(pid: pid))
             self.update(\.deviceMaxDPI, RazerDevices.maxDPI(pid: pid))
         }
-        restoreBluetoothSettingsIfNeeded(device: d, deviceKey: key)
         return d
-    }
-
-    /// `io` queue only. Restore a snapshot once per newly opened Bluetooth session. DPI
-    /// stages, power timeout and brightness have protocol readback. Static colour has no read
-    /// command, so it is deliberately not replayed on reconnect where it could override a
-    /// change made by another controller app.
-    private func restoreBluetoothSettingsIfNeeded(device: any RazerTransport, deviceKey: String) {
-        guard device.isBluetooth, device.productID == 0x00BA,
-              restoredBluetoothSettingsForKey != deviceKey else { return }
-        restoredBluetoothSettingsForKey = deviceKey
-        guard let bluetooth = device as? BluetoothDevice,
-              let snapshot = bluetoothSettingsStore.snapshot(for: deviceKey) else { return }
-
-        publish { self.update(\.bluetoothRecoveryState, .restoringSettings) }
-        var stagesRestored: BLEProtocol.DPIStageTable?
-        var timeoutRestored: Int?
-        var brightnessRestored: Int?
-
-        if let saved = snapshot.dpiStages,
-           (1...RazerCommands.maxDPIStages).contains(saved.values.count),
-           saved.values.allSatisfy({ (100...RazerDevices.maxDPI(pid: 0x00BA)).contains($0) }),
-           saved.values.indices.contains(saved.active) {
-            do {
-                // Preserve the stage selected on the mouse; its DPI button may have changed
-                // it since the settings snapshot was saved.
-                let current = try bluetooth.readDpiStages()
-                let target = BLEProtocol.DPIStageTable(
-                    active: min(current.active, saved.values.count - 1), values: saved.values)
-                if current.values != saved.values { try bluetooth.setDpiStages(target) }
-                stagesRestored = try bluetooth.readDpiStages()
-                if stagesRestored?.values != saved.values { stagesRestored = nil }
-            } catch { logBluetoothRestoreFailure("DPI stages", error) }
-        }
-
-        if let seconds = snapshot.sleepTimeout,
-           BLEProtocol.sleepTimeoutPayload(seconds: seconds) != nil {
-            do {
-                if try bluetooth.readSleepTimeout() != seconds { try bluetooth.setSleepTimeout(seconds) }
-                if try bluetooth.readSleepTimeout() == seconds { timeoutRestored = seconds }
-            } catch { logBluetoothRestoreFailure("sleep timeout", error) }
-        }
-
-        if let percent = snapshot.brightness, (0...100).contains(percent) {
-            let led = RazerDevices.brightnessLed(pid: 0x00BA)
-            let targetRaw = RazerCommands.brightnessRaw(fromPercent: percent)
-            do {
-                let current = try? device.sendWithRetry(RazerCommands.getBrightness(led: led)).arguments[2]
-                if current != targetRaw {
-                    _ = try device.sendWithRetry(RazerCommands.setBrightness(targetRaw, led: led))
-                }
-                let confirmed = try device.sendWithRetry(RazerCommands.getBrightness(led: led)).arguments[2]
-                if confirmed == targetRaw { brightnessRestored = percent }
-            } catch { logBluetoothRestoreFailure("brightness", error) }
-        }
-
-        let confirmedStages = stagesRestored
-        let confirmedTimeout = timeoutRestored
-        let confirmedBrightness = brightnessRestored
-        publish {
-            if let confirmedStages {
-                self.dpiStages = confirmedStages.values
-                self.activeDpiStage = confirmedStages.active
-                if confirmedStages.values.indices.contains(confirmedStages.active) {
-                    self.dpi = confirmedStages.values[confirmedStages.active]
-                }
-            }
-            if let confirmedTimeout { self.sleepTimeout = confirmedTimeout }
-            if let confirmedBrightness { self.brightness = confirmedBrightness }
-            self.update(\.bluetoothRecoveryState, .idle)
-        }
-    }
-
-    private func logBluetoothRestoreFailure(_ setting: String, _ error: Error) {
-        FileHandle.standardError.write(Data(
-            "[MacRazer] couldn't restore Basilisk Bluetooth \(setting): \(error)\n".utf8))
     }
 
     /// Moves every per-device store from one key to another — files and UserDefaults —
