@@ -49,14 +49,14 @@ final class HIDInputWatcherTests: XCTestCase {
 
     func testWakeSourceIncludesSupportedBluetoothMouseButNotOtherBluetoothMice() {
         XCTAssertTrue(HIDInputWatcher.isWakeSource(vendorID: 0x068E, productID: 0x00BA,
-                                                    transport: "Bluetooth Low Energy", usbVendorID: 0x1532))
-        XCTAssertTrue(HIDInputWatcher.isWakeSource(vendorID: 0x1532, productID: 0x00BA,
-                                                    transport: "USB", usbVendorID: 0x1532))
+                                                    transport: "Bluetooth Low Energy"))
+        XCTAssertFalse(HIDInputWatcher.isWakeSource(vendorID: 0x1532, productID: 0x00BA,
+                                                     transport: "USB"))
         XCTAssertFalse(HIDInputWatcher.isWakeSource(vendorID: 0x004C, productID: 0x0269,
-                                                     transport: "Bluetooth", usbVendorID: 0x1532))
+                                                     transport: "Bluetooth"))
         XCTAssertFalse(HIDInputWatcher.isWakeSource(vendorID: 0x068E, productID: 0x1234,
-                                                     transport: "Bluetooth", usbVendorID: 0x1532))
+                                                     transport: "Bluetooth"))
         XCTAssertFalse(HIDInputWatcher.isWakeSource(vendorID: 0x068E, productID: 0x00BA,
-                                                     transport: "USB", usbVendorID: 0x1532))
+                                                     transport: "USB"))
     }
 }

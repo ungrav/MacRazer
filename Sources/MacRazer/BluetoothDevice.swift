@@ -188,7 +188,8 @@ final class BluetoothDevice: NSObject, RazerTransport, @unchecked Sendable {
     /// continue to use `sendWithRetry` above.
     func readDpiCycleBinding() throws -> BLEProtocol.DPIButtonBinding {
         let request = BLEProtocol.Request(key: .dpiButtonGet, payload: [], reply: .ack)
-        return try BLEProtocol.parseDpiButtonBinding(exchange(request))
+        let payload = try RazerRetry.run(attempts: HIDDevice.defaultAttempts) { try exchange(request) }
+        return try BLEProtocol.parseDpiButtonBinding(payload)
     }
 
     /// Write a DPI Cycle assignment and verify the mouse's readback before returning. A

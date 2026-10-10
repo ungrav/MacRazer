@@ -71,8 +71,7 @@ final class HIDInputWatcher: @unchecked Sendable {
             let transport = IOHIDDeviceGetProperty(device, kIOHIDTransportKey as CFString) as? String ?? ""
             let deviceVendor = IOHIDDeviceGetProperty(device, kIOHIDVendorIDKey as CFString) as? Int
             let productID = IOHIDDeviceGetProperty(device, kIOHIDProductIDKey as CFString) as? Int
-            return Self.isWakeSource(vendorID: deviceVendor, productID: productID, transport: transport,
-                                     usbVendorID: vendorId)
+            return Self.isWakeSource(vendorID: deviceVendor, productID: productID, transport: transport)
         } : []
         let devices = usbDevices + bluetoothDevices
         var opened: [(device: IOHIDDevice, buffer: UnsafeMutablePointer<UInt8>, size: Int)] = []
@@ -100,9 +99,7 @@ final class HIDInputWatcher: @unchecked Sendable {
         selfContext = context
     }
 
-    static func isWakeSource(vendorID: Int?, productID: Int?, transport: String,
-                             usbVendorID: Int) -> Bool {
-        if vendorID == usbVendorID { return true }
+    static func isWakeSource(vendorID: Int?, productID: Int?, transport: String) -> Bool {
         guard transport.localizedCaseInsensitiveContains("Bluetooth"),
               vendorID == BLEProtocol.vendorId,
               let productID else { return false }

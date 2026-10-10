@@ -251,7 +251,12 @@ final class ButtonRemapper: ObservableObject, @unchecked Sendable {
             tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
             eventsOfInterest: CGEventMask(mask), callback: Self.tapCallback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else { return }
+        ) else {
+            // macOS may reject keyboard capture while allowing mouse events. Keep ordinary
+            // button remapping available even when the optional F20 bridge cannot run.
+            if includeKeyboard { installTap(includeKeyboard: false) }
+            return
+        }
 
         let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
@@ -489,6 +494,7 @@ final class ButtonRemapper: ObservableObject, @unchecked Sendable {
 
     func saveDpiSoftwareAction(_ action: RemapAction?) {
         guard isBasiliskV3XHyperSpeed else { return }
+        let previous = dpiCycleSoftwareAction
         dpiCycleSoftwareAction = action
         let key = "dpiCycleSoftwareAction-\(activeKey)"
         if let action, let data = try? JSONEncoder().encode(action) {
@@ -497,7 +503,7 @@ final class ButtonRemapper: ObservableObject, @unchecked Sendable {
             defaults.removeObject(forKey: key)
         }
         installTapIfNeeded()
-        onManualChange?()
+        if action != previous { onManualChange?() }
     }
 
     private func loadDpiSoftwareAction() {

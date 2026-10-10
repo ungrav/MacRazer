@@ -39,6 +39,40 @@ final class DpiCycleSoftwareBridgeTests: XCTestCase {
         XCTAssertFalse(remapper.dpiBridgeBindingConfirmed)
     }
 
+    func testReapplyingSavedActionDoesNotCountAsManualChange() {
+        let (remapper, _) = remapper()
+        remapper.setActiveDevice("PM2533", deviceID: 0x00BA)
+        var manualChanges = 0
+        remapper.onManualChange = { manualChanges += 1 }
+        let action = RemapAction.mediaKey(code: 16, name: "Play / Pause")
+
+        remapper.saveDpiSoftwareAction(action)
+        remapper.saveDpiSoftwareAction(action)
+        XCTAssertEqual(manualChanges, 1)
+
+        remapper.saveDpiSoftwareAction(.doubleClick)
+        XCTAssertEqual(manualChanges, 2)
+    }
+
+    func testSoftwareActionMigratesFromPidFallbackToSerialKey() throws {
+        let oldKey = "test-pid-\(UUID().uuidString)"
+        let newKey = "test-serial-\(UUID().uuidString)"
+        let defaults = UserDefaults.standard
+        let source = "dpiCycleSoftwareAction-\(oldKey)"
+        let destination = "dpiCycleSoftwareAction-\(newKey)"
+        defer {
+            defaults.removeObject(forKey: source)
+            defaults.removeObject(forKey: destination)
+        }
+        let action = RemapAction.mediaKey(code: 16, name: "Play / Pause")
+        defaults.set(try JSONEncoder().encode(action), forKey: source)
+
+        MouseController.migratePerDeviceData(from: oldKey, to: newKey)
+
+        XCTAssertNil(defaults.object(forKey: source))
+        XCTAssertEqual(defaults.data(forKey: destination), try JSONEncoder().encode(action))
+    }
+
     func testKeyboardTapMaskIsOptIn() {
         let mouseOnly = CGEventMask(1 << CGEventType.otherMouseDown.rawValue)
         let keyboard = mouseOnly | CGEventMask(1 << CGEventType.keyDown.rawValue)

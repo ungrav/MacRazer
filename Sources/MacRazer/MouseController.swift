@@ -236,10 +236,10 @@ final class MouseController: ObservableObject, @unchecked Sendable {
     private func mouseInputSeen() {
         guard Date().timeIntervalSince(lastInputTriggeredCheck) >= 2 else { return }
         lastInputTriggeredCheck = Date()
-        // Logged like the read failures above it: when someone reports a mouse that stayed
-        // offline after waking, this line says whether the app was told about the movement.
+        // Log the movement for offline reconnect reports, then use the ordinary offline
+        // check so repeated movement still respects the Bluetooth open-failure cooldown.
         FileHandle.standardError.write(Data("[MacRazer] mouse moved while offline — checking now\n".utf8))
-        beginWakeRecovery()
+        checkIfOffline()
     }
 
     /// A wake or mouse movement is strong evidence that a sleeping peripheral may have
@@ -1507,7 +1507,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
     /// filling holes only (existing destination data is never overwritten). The key
     /// patterns mirror their owners (BatteryHistory, ChargeCycleHistory, ProfileStore,
     /// ButtonRemapper, PopoverView's custom DPI).
-    private static func migratePerDeviceData(from old: String, to new: String) {
+    static func migratePerDeviceData(from old: String, to new: String) {
         let fm = FileManager.default
         let dir = StoreDirectory.default
         for prefix in ["battery-history-", "charge-cycles-"] {
@@ -1518,7 +1518,7 @@ final class MouseController: ObservableObject, @unchecked Sendable {
             }
         }
         let defaults = UserDefaults.standard
-        for prefix in ["learnedDischargeRate-", "buttonMappings-", "customDPI-", "basiliskBluetoothSettings-"] {
+        for prefix in ["learnedDischargeRate-", "buttonMappings-", "customDPI-", "dpiCycleSoftwareAction-"] {
             let srcKey = "\(prefix)\(old)", dstKey = "\(prefix)\(new)"
             if let value = defaults.object(forKey: srcKey), defaults.object(forKey: dstKey) == nil {
                 defaults.set(value, forKey: dstKey)
